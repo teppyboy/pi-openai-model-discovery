@@ -15,6 +15,7 @@
 **Files:**
 
 - Create: `package.json`
+- Create: `.gitignore`
 
 - [ ] **Step 1: Add the Pi package manifest**
 
@@ -25,8 +26,16 @@
   "private": true,
   "type": "module",
   "keywords": ["pi-package"],
+  "files": ["extensions", "README.md"],
   "scripts": {
-    "test": "node --test --experimental-strip-types test/openai-model-discovery.test.ts"
+    "test": "node --test --experimental-strip-types test/openai-model-discovery.test.ts",
+    "check": "node --experimental-strip-types --check extensions/openai-model-discovery.ts"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0"
   },
   "pi": {
     "extensions": ["./extensions/openai-model-discovery.ts"]
@@ -34,7 +43,15 @@
 }
 ```
 
-- [ ] **Step 2: Check the manifest parses**
+- [ ] **Step 2: Ignore installed dependencies**
+
+Create `.gitignore`:
+
+```gitignore
+node_modules/
+```
+
+- [ ] **Step 3: Check the manifest parses**
 
 Run: `node -e "JSON.parse(require('fs').readFileSync('package.json', 'utf8')); console.log('package.json OK')"`
 
@@ -212,7 +229,7 @@ Expected: all tests pass.
 
 Run: `git diff --check && git status --short && git diff --stat HEAD`
 
-Expected: no whitespace errors; only the package, test, README, plan, and spec files are present.
+Expected: no whitespace errors; only `.gitignore`, package files, extension/test/README files, plan, and spec files are present. `node_modules/` is ignored.
 
 - [ ] **Step 2: Run the final test**
 
@@ -225,7 +242,7 @@ Expected: all tests pass.
 Run:
 
 ```bash
-git add package.json extensions/openai-model-discovery.ts test/openai-model-discovery.test.ts README.md docs/superpowers/plans/2026-08-15-openai-model-discovery.md
+git add .gitignore package.json package-lock.json extensions/openai-model-discovery.ts test/openai-model-discovery.test.ts README.md docs/superpowers/plans/2026-08-15-openai-model-discovery.md
 git commit -m "feat: discover OpenAI-compatible models"
 ```
 

@@ -1,0 +1,21 @@
+{
+  "name": "pi-openai-model-discovery",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "keywords": ["pi-package"],
+  "files": ["extensions", "README.md"],
+  "scripts": {
+    "test": "node --test --experimental-strip-types test/openai-model-discovery.test.ts",
+    "check": "node --experimental-strip-types --check extensions/openai-model-discovery.ts"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0"
+  },
+  "pi": {
+    "extensions": ["./extensions/openai-model-discovery.ts"]
+  }
+}
