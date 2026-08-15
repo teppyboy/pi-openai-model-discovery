@@ -28,7 +28,14 @@ export type DynamicProvider = {
 	api: ProviderApi;
 };
 
-type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
+type ThinkingLevel =
+	| "off"
+	| "minimal"
+	| "low"
+	| "medium"
+	| "high"
+	| "xhigh"
+	| "max";
 type ThinkingLevelMap = Partial<Record<ThinkingLevel, string | null>>;
 
 export type ProviderModelDefinition = {
@@ -101,18 +108,28 @@ function reasoningLevels(value: unknown): string[] {
 	if (!Array.isArray(value)) return [];
 	return value.flatMap((entry) => {
 		const raw = typeof entry === "string" ? entry : asObject(entry)?.effort;
-		return typeof raw === "string" && raw.trim() ? [raw.trim().toLowerCase()] : [];
+		return typeof raw === "string" && raw.trim()
+			? [raw.trim().toLowerCase()]
+			: [];
 	});
 }
 
 function reasoningFromLevels(value: unknown): boolean | undefined {
 	const levels = reasoningLevels(value);
-	return levels.length > 0 ? levels.some((level) => level !== "none" && level !== "off") : undefined;
+	return levels.length > 0
+		? levels.some((level) => level !== "none" && level !== "off")
+		: undefined;
 }
 
-function thinkingLevelMapFromLevels(value: unknown): ThinkingLevelMap | undefined {
-	const map: ThinkingLevelMap = {};
-	for (const level of reasoningLevels(value)) {
+function thinkingLevelMapFromLevels(
+	value: unknown,
+	allowExtended = true,
+): ThinkingLevelMap | undefined {
+	const levels = reasoningLevels(value);
+	if (levels.length === 0) return undefined;
+
+	const map: ThinkingLevelMap = { xhigh: null, max: null };
+	for (const level of levels) {
 		switch (level) {
 			case "none":
 			case "off":
@@ -122,16 +139,30 @@ function thinkingLevelMapFromLevels(value: unknown): ThinkingLevelMap | undefine
 			case "low":
 			case "medium":
 			case "high":
+				map[level] = level;
+				break;
 			case "xhigh":
 			case "max":
-				map[level] = level;
+				if (allowExtended) map[level] = level;
 				break;
 		}
 	}
-	return Object.keys(map).length > 0 ? map : undefined;
+	if (levels.includes("low") && !levels.includes("minimal")) {
+		map.minimal = "low";
+	}
+	return map;
 }
 
-function inputFromModel(model: JsonObject | undefined, capabilities: JsonObject | undefined): Array<"text" | "image"> {
+function isGptReasoningModel(id: string): boolean {
+	// ponytail: bare 9router catalogs expose IDs only; use the conservative GPT-5
+	// floor until the gateway provides per-model reasoning metadata.
+	return /(?:^|\/)gpt-5(?:[.-]|$)/i.test(id);
+}
+
+function inputFromModel(
+	model: JsonObject | undefined,
+	capabilities: JsonObject | undefined,
+): Array<"text" | "image"> {
 	const candidates = [
 		model?.input,
 		model?.input_types,
@@ -141,7 +172,11 @@ function inputFromModel(model: JsonObject | undefined, capabilities: JsonObject 
 		capabilities?.input_modalities,
 		capabilities?.inputModalities,
 	];
-	const input = candidates.map(validInput).find((value): value is Array<"text" | "image"> => value !== undefined) ?? ["text"];
+	const input = candidates
+		.map(validInput)
+		.find((value): value is Array<"text" | "image"> => value !== undefined) ?? [
+		"text",
+	];
 	if (model?.vision === true || capabilities?.vision === true) {
 		const augmented: Array<"text" | "image"> = [...input];
 		if (!augmented.includes("image")) augmented.push("image");
@@ -224,7 +259,8 @@ export function mapModelRecord(
 	provider: DynamicProvider,
 ): ProviderModelDefinition {
 	const model = asObject(record);
-	const id = firstString(model?.id, model?.slug, model?.model, model?.name) ?? "";
+	const id =
+		firstString(model?.id, model?.slug, model?.model, model?.name) ?? "";
 	if (!id)
 		throw new Error(
 			`Model discovery failed for ${provider.id}: every model needs a non-empty id`,
@@ -236,19 +272,25 @@ export function mapModelRecord(
 		model?.supported_reasoning_levels ??
 		model?.reasoning_levels ??
 		capabilities?.supported_reasoning_levels;
-	const thinkingLevelMap = thinkingLevelMapFromLevels(levels);
+	const gptModel = isGptReasoningModel(id);
+	const explicitReasoning = firstBoolean(
+		model?.reasoning,
+		model?.supports_reasoning,
+		capabilities?.reasoning,
+		reasoningFromLevels(levels),
+	);
+	const reasoning = explicitReasoning ?? gptModel;
+	const thinkingLevelMap =
+		thinkingLevelMapFromLevels(levels, !gptModel) ??
+		(reasoning && gptModel
+			? { minimal: "low", xhigh: null, max: null }
+			: undefined);
 	return {
 		id,
 		name: firstString(model?.name, model?.display_name, model?.displayName) ?? id,
 		api: provider.api,
 		baseUrl: provider.baseUrl,
-		reasoning:
-			firstBoolean(
-				model?.reasoning,
-				model?.supports_reasoning,
-				capabilities?.reasoning,
-				reasoningFromLevels(levels),
-			) ?? false,
+		reasoning,
 		...(thinkingLevelMap ? { thinkingLevelMap } : {}),
 		input: inputFromModel(model, capabilities),
 		cost: {
@@ -329,21 +371,23 @@ function extractModelRecords(payload: unknown): unknown[] | undefined {
 function hasModelMetadata(record: unknown): boolean {
 	const model = asObject(record);
 	if (!model) return false;
-	return [
-		"slug",
-		"name",
-		"display_name",
-		"context_window",
-		"context_length",
-		"max_context_window",
-		"max_completion_tokens",
-		"max_output_tokens",
-		"input_modalities",
-		"supportedInputModalities",
-		"supported_reasoning_levels",
-		"reasoning",
-		"supports_reasoning",
-	].some((key) => key in model) || asObject(model.capabilities) !== undefined;
+	return (
+		[
+			"slug",
+			"name",
+			"display_name",
+			"context_window",
+			"context_length",
+			"max_context_window",
+			"max_completion_tokens",
+			"max_output_tokens",
+			"input_modalities",
+			"supportedInputModalities",
+			"supported_reasoning_levels",
+			"reasoning",
+			"supports_reasoning",
+		].some((key) => key in model) || asObject(model.capabilities) !== undefined
+	);
 }
 
 async function fetchCatalog(

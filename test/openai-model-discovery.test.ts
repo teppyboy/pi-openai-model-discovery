@@ -138,7 +138,7 @@ test("mapModelRecord uses metadata and conservative defaults", () => {
 test("maps 9router and CLIProxyAPI capability metadata", () => {
 	const nineRouter = mapModelRecord(
 		{
-			id: "claude-sonnet",
+			id: "gpt-5.6-sol",
 			capabilities: { vision: true, reasoning: true },
 			context_length: 1_000_000,
 			max_completion_tokens: 128_000,
@@ -149,6 +149,19 @@ test("maps 9router and CLIProxyAPI capability metadata", () => {
 	assert.deepEqual(nineRouter.input, ["text", "image"]);
 	assert.equal(nineRouter.contextWindow, 1_000_000);
 	assert.equal(nineRouter.maxTokens, 128_000);
+	assert.deepEqual(nineRouter.thinkingLevelMap, {
+		minimal: "low",
+		xhigh: null,
+		max: null,
+	});
+
+	const bareNineRouter = mapModelRecord({ id: "gpt-5.6-sol" }, dynamicProvider);
+	assert.equal(bareNineRouter.reasoning, true);
+	assert.deepEqual(bareNineRouter.thinkingLevelMap, {
+		minimal: "low",
+		xhigh: null,
+		max: null,
+	});
 
 	const cliProxyApi = mapModelRecord(
 		{
@@ -158,6 +171,7 @@ test("maps 9router and CLIProxyAPI capability metadata", () => {
 			context_window: 372_000,
 			supported_reasoning_levels: [
 				{ effort: "low" },
+				{ effort: "medium" },
 				{ effort: "high" },
 				{ effort: "xhigh" },
 				{ effort: "max" },
@@ -171,10 +185,12 @@ test("maps 9router and CLIProxyAPI capability metadata", () => {
 	assert.deepEqual(cliProxyApi.input, ["text", "image"]);
 	assert.equal(cliProxyApi.contextWindow, 372_000);
 	assert.deepEqual(cliProxyApi.thinkingLevelMap, {
+		xhigh: null,
+		max: null,
 		low: "low",
+		medium: "medium",
 		high: "high",
-		xhigh: "xhigh",
-		max: "max",
+		minimal: "low",
 	});
 });
 
@@ -291,13 +307,21 @@ test("uses CLIProxyAPI's rich catalog when /v1/models is skeletal", async () => 
 		}
 		return new Response(
 			JSON.stringify({
-				models: [{
-					slug: "gpt-5.6-sol",
-					display_name: "GPT-5.6 Sol",
-					context_window: 372_000,
-					input_modalities: ["text", "image"],
-					supported_reasoning_levels: [{ effort: "high" }, { effort: "max" }],
-				}],
+				models: [
+					{
+						slug: "gpt-5.6-sol",
+						display_name: "GPT-5.6 Sol",
+						context_window: 372_000,
+						input_modalities: ["text", "image"],
+						supported_reasoning_levels: [
+							{ effort: "low" },
+							{ effort: "medium" },
+							{ effort: "high" },
+							{ effort: "xhigh" },
+							{ effort: "max" },
+						],
+					},
+				],
 			}),
 			{ status: 200 },
 		);
@@ -308,11 +332,24 @@ test("uses CLIProxyAPI's rich catalog when /v1/models is skeletal", async () => 
 			dynamicProvider,
 			context({ publish: async () => true }),
 		);
-		assert.deepEqual(models.map((model) => model.id), ["gpt-5.6-sol"]);
+		assert.deepEqual(
+			models.map((model) => model.id),
+			["gpt-5.6-sol"],
+		);
 		assert.equal(models[0]?.contextWindow, 372_000);
 		assert.deepEqual(models[0]?.input, ["text", "image"]);
-		assert.deepEqual(models[0]?.thinkingLevelMap, { high: "high", max: "max" });
-		assert.equal(new URL(requestedUrls[1] ?? "").searchParams.get("client_version"), "pi");
+		assert.deepEqual(models[0]?.thinkingLevelMap, {
+			xhigh: null,
+			max: null,
+			low: "low",
+			medium: "medium",
+			high: "high",
+			minimal: "low",
+		});
+		assert.equal(
+			new URL(requestedUrls[1] ?? "").searchParams.get("client_version"),
+			"pi",
+		);
 	} finally {
 		globalThis.fetch = originalFetch;
 	}
