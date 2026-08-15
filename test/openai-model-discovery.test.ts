@@ -3,7 +3,10 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import type { ExtensionAPI, ProviderConfig } from "@earendil-works/pi-coding-agent";
+import type {
+	ExtensionAPI,
+	ProviderConfig,
+} from "@earendil-works/pi-coding-agent";
 import openAIModelDiscovery, {
 	DEFAULT_CONTEXT_WINDOW,
 	DEFAULT_MAX_TOKENS,
@@ -15,7 +18,9 @@ import openAIModelDiscovery, {
 	type DynamicProvider,
 } from "../extensions/openai-model-discovery.ts";
 
-type RefreshContext = Parameters<NonNullable<ProviderConfig["refreshModels"]>>[0];
+type RefreshContext = Parameters<
+	NonNullable<ProviderConfig["refreshModels"]>
+>[0];
 type Publication = Parameters<RefreshContext["publish"]>[0];
 
 type Registration = {
@@ -38,7 +43,9 @@ function context(overrides: Partial<RefreshContext> = {}): RefreshContext {
 	} as RefreshContext;
 }
 
-async function writeConfig(content: string): Promise<{ directory: string; filePath: string }> {
+async function writeConfig(
+	content: string,
+): Promise<{ directory: string; filePath: string }> {
 	const directory = await mkdtemp(join(tmpdir(), "pi-openai-discovery-"));
 	const filePath = join(directory, "models.json");
 	await writeFile(filePath, content, "utf8");
@@ -46,11 +53,13 @@ async function writeConfig(content: string): Promise<{ directory: string; filePa
 }
 
 test("stripJsonComments preserves URLs and removes comments/trailing commas", () => {
-	const parsed = JSON.parse(stripJsonComments(`{
+	const parsed = JSON.parse(
+		stripJsonComments(`{
 		"url": "http://localhost:1234/v1//models",
 		// comment
 		"value": 1,
-	}`));
+	}`),
+	);
 
 	assert.equal(parsed.url, "http://localhost:1234/v1//models");
 	assert.equal(parsed.value, 1);
@@ -76,8 +85,16 @@ test("readDynamicProviders selects only providers without static models", async 
 
 	try {
 		assert.deepEqual(await readDynamicProviders(filePath), [
-			{ id: "dynamic", baseUrl: "http://localhost:1234/v1", api: "openai-completions" },
-			{ id: "empty", baseUrl: "https://example.test/v1", api: "openai-completions" },
+			{
+				id: "dynamic",
+				baseUrl: "http://localhost:1234/v1",
+				api: "openai-completions",
+			},
+			{
+				id: "empty",
+				baseUrl: "https://example.test/v1",
+				api: "openai-completions",
+			},
 		]);
 	} finally {
 		await rm(directory, { recursive: true, force: true });
@@ -118,8 +135,54 @@ test("mapModelRecord uses metadata and conservative defaults", () => {
 	assert.equal(defaults.maxTokens, DEFAULT_MAX_TOKENS);
 });
 
+test("maps 9router and CLIProxyAPI capability metadata", () => {
+	const nineRouter = mapModelRecord(
+		{
+			id: "claude-sonnet",
+			capabilities: { vision: true, reasoning: true },
+			context_length: 1_000_000,
+			max_completion_tokens: 128_000,
+		},
+		dynamicProvider,
+	);
+	assert.equal(nineRouter.reasoning, true);
+	assert.deepEqual(nineRouter.input, ["text", "image"]);
+	assert.equal(nineRouter.contextWindow, 1_000_000);
+	assert.equal(nineRouter.maxTokens, 128_000);
+
+	const cliProxyApi = mapModelRecord(
+		{
+			slug: "gpt-5.6-sol",
+			display_name: "GPT-5.6 Sol",
+			input_modalities: ["text", "image"],
+			context_window: 372_000,
+			supported_reasoning_levels: [
+				{ effort: "low" },
+				{ effort: "high" },
+				{ effort: "xhigh" },
+				{ effort: "max" },
+			],
+		},
+		dynamicProvider,
+	);
+	assert.equal(cliProxyApi.id, "gpt-5.6-sol");
+	assert.equal(cliProxyApi.name, "GPT-5.6 Sol");
+	assert.equal(cliProxyApi.reasoning, true);
+	assert.deepEqual(cliProxyApi.input, ["text", "image"]);
+	assert.equal(cliProxyApi.contextWindow, 372_000);
+	assert.deepEqual(cliProxyApi.thinkingLevelMap, {
+		low: "low",
+		high: "high",
+		xhigh: "xhigh",
+		max: "max",
+	});
+});
+
 test("modelDiscoveryUrl validates schemes and appends /models", () => {
-	assert.equal(modelDiscoveryUrl("https://example.test/v1/").toString(), "https://example.test/v1/models");
+	assert.equal(
+		modelDiscoveryUrl("https://example.test/v1/").toString(),
+		"https://example.test/v1/models",
+	);
 	assert.throws(() => modelDiscoveryUrl("file:///tmp/models"), /HTTP\(S\)/);
 	assert.throws(() => modelDiscoveryUrl("not a URL"), /valid HTTP/);
 });
@@ -142,10 +205,21 @@ test("registered providers discover models with Bearer auth and persist them", a
 	globalThis.fetch = async (input, init) => {
 		requestUrl = String(input);
 		requestHeaders = init?.headers;
-		return new Response(JSON.stringify({ data: [{ id: "server-model" }] }), {
-			status: 200,
-			headers: { "content-type": "application/json" },
-		});
+		return new Response(
+			JSON.stringify({
+				data: [
+					{
+						id: "server-model",
+						context_length: 128_000,
+						max_completion_tokens: 16_384,
+					},
+				],
+			}),
+			{
+				status: 200,
+				headers: { "content-type": "application/json" },
+			},
+		);
 	};
 
 	const registrations: Registration[] = [];
@@ -174,8 +248,14 @@ test("registered providers discover models with Bearer auth and persist them", a
 		);
 
 		assert.equal(requestUrl, "http://127.0.0.1:1234/v1/models");
-		assert.equal((requestHeaders as Record<string, string>).Authorization, "Bearer test-key");
-		assert.deepEqual(models.map((model) => model.id), ["server-model"]);
+		assert.equal(
+			(requestHeaders as Record<string, string>).Authorization,
+			"Bearer test-key",
+		);
+		assert.deepEqual(
+			models.map((model) => model.id),
+			["server-model"],
+		);
 		const persisted = published[0]?.persist;
 		assert.ok(persisted);
 		assert.equal(persisted.models[0]?.provider, "local-server");
@@ -187,12 +267,54 @@ test("registered providers discover models with Bearer auth and persist them", a
 				stored: persisted,
 			}),
 		);
-		assert.deepEqual(restored.map((model) => model.id), ["server-model"]);
+		assert.deepEqual(
+			restored.map((model) => model.id),
+			["server-model"],
+		);
 	} finally {
 		globalThis.fetch = originalFetch;
 		if (originalDirectory === undefined) delete process.env.PI_CODING_AGENT_DIR;
 		else process.env.PI_CODING_AGENT_DIR = originalDirectory;
 		await rm(directory, { recursive: true, force: true });
+	}
+});
+
+test("uses CLIProxyAPI's rich catalog when /v1/models is skeletal", async () => {
+	const originalFetch = globalThis.fetch;
+	const requestedUrls: string[] = [];
+	globalThis.fetch = async (input) => {
+		requestedUrls.push(String(input));
+		if (requestedUrls.length === 1) {
+			return new Response(JSON.stringify({ data: [{ id: "gpt-5.6-sol" }] }), {
+				status: 200,
+			});
+		}
+		return new Response(
+			JSON.stringify({
+				models: [{
+					slug: "gpt-5.6-sol",
+					display_name: "GPT-5.6 Sol",
+					context_window: 372_000,
+					input_modalities: ["text", "image"],
+					supported_reasoning_levels: [{ effort: "high" }, { effort: "max" }],
+				}],
+			}),
+			{ status: 200 },
+		);
+	};
+
+	try {
+		const models = await refreshProvider(
+			dynamicProvider,
+			context({ publish: async () => true }),
+		);
+		assert.deepEqual(models.map((model) => model.id), ["gpt-5.6-sol"]);
+		assert.equal(models[0]?.contextWindow, 372_000);
+		assert.deepEqual(models[0]?.input, ["text", "image"]);
+		assert.deepEqual(models[0]?.thinkingLevelMap, { high: "high", max: "max" });
+		assert.equal(new URL(requestedUrls[1] ?? "").searchParams.get("client_version"), "pi");
+	} finally {
+		globalThis.fetch = originalFetch;
 	}
 });
 
@@ -204,7 +326,8 @@ test("failed discovery does not publish a replacement catalog", async () => {
 		}
 	}`);
 	let published = 0;
-	globalThis.fetch = async () => new Response("upstream unavailable", { status: 503 });
+	globalThis.fetch = async () =>
+		new Response("upstream unavailable", { status: 503 });
 
 	try {
 		const [provider] = await readDynamicProviders(filePath);

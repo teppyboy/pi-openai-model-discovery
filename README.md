@@ -34,7 +34,9 @@ Add providers to `~/.pi/agent/models.json` without listing `models`:
 
 The extension also honors `PI_CODING_AGENT_DIR`. Providers with a non-empty `models` array are left unchanged. If `api` is omitted, it defaults to `openai-completions`.
 
-During Pi's model-catalog refresh, the extension requests `GET {baseUrl}/models` (for the example, `/v1/models`) and maps each `data[].id` into a Pi model. A resolved API-key credential is sent as `Authorization: Bearer ...`.
+During Pi's model-catalog refresh, the extension requests `GET {baseUrl}/models` (for the example, `/v1/models`) and maps the response into Pi models. A resolved API-key credential is sent as `Authorization: Bearer ...`.
+
+The mapper understands 9router's `context_length`, `max_completion_tokens`, and nested `capabilities` fields. When a catalog contains only bare IDs, it makes an optional `?client_version=pi` request for gateways such as CLIProxyAPI, which exposes richer `models[].slug`, `context_window`, `input_modalities`, and `supported_reasoning_levels` metadata there.
 
 ## Defaults and failures
 

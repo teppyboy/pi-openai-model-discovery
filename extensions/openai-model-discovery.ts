@@ -1,14 +1,19 @@
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import type { ExtensionAPI, ProviderConfig } from "@earendil-works/pi-coding-agent";
+import type {
+	ExtensionAPI,
+	ProviderConfig,
+} from "@earendil-works/pi-coding-agent";
 
 export const DEFAULT_API = "openai-completions";
 export const DEFAULT_CONTEXT_WINDOW = 128_000;
 export const DEFAULT_MAX_TOKENS = 16_384;
 
 type ProviderApi = NonNullable<ProviderConfig["api"]>;
-type RefreshContext = Parameters<NonNullable<ProviderConfig["refreshModels"]>>[0];
+type RefreshContext = Parameters<
+	NonNullable<ProviderConfig["refreshModels"]>
+>[0];
 
 const DEFAULT_COST = {
 	input: 0,
@@ -23,12 +28,16 @@ export type DynamicProvider = {
 	api: ProviderApi;
 };
 
+type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
+type ThinkingLevelMap = Partial<Record<ThinkingLevel, string | null>>;
+
 export type ProviderModelDefinition = {
 	id: string;
 	name: string;
 	api: ProviderApi;
 	baseUrl: string;
 	reasoning: boolean;
+	thinkingLevelMap?: ThinkingLevelMap;
 	input: Array<"text" | "image">;
 	cost: typeof DEFAULT_COST;
 	contextWindow: number;
@@ -49,13 +58,16 @@ function firstBoolean(...values: unknown[]): boolean | undefined {
 
 function positiveNumber(...values: unknown[]): number | undefined {
 	for (const value of values) {
-		if (typeof value === "number" && Number.isFinite(value) && value > 0) return value;
+		if (typeof value === "number" && Number.isFinite(value) && value > 0)
+			return value;
 	}
 	return undefined;
 }
 
 function numberOrZero(value: unknown): number {
-	return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : 0;
+	return typeof value === "number" && Number.isFinite(value) && value >= 0
+		? value
+		: 0;
 }
 
 function validInput(value: unknown): Array<"text" | "image"> | undefined {
@@ -64,30 +76,110 @@ function validInput(value: unknown): Array<"text" | "image"> | undefined {
 	else if (typeof value === "string") values = [value];
 	else values = [];
 
-	const input = [...new Set(values.filter((item): item is "text" | "image" => item === "text" || item === "image"))];
+	const input = [
+		...new Set(
+			values.flatMap((item) => {
+				if (typeof item !== "string") return [];
+				const normalized = item.toLowerCase();
+				return normalized === "text" || normalized === "image"
+					? [normalized as "text" | "image"]
+					: [];
+			}),
+		),
+	];
 	return input.length > 0 ? input : undefined;
+}
+
+function firstString(...values: unknown[]): string | undefined {
+	for (const value of values) {
+		if (typeof value === "string" && value.trim()) return value.trim();
+	}
+	return undefined;
+}
+
+function reasoningLevels(value: unknown): string[] {
+	if (!Array.isArray(value)) return [];
+	return value.flatMap((entry) => {
+		const raw = typeof entry === "string" ? entry : asObject(entry)?.effort;
+		return typeof raw === "string" && raw.trim() ? [raw.trim().toLowerCase()] : [];
+	});
+}
+
+function reasoningFromLevels(value: unknown): boolean | undefined {
+	const levels = reasoningLevels(value);
+	return levels.length > 0 ? levels.some((level) => level !== "none" && level !== "off") : undefined;
+}
+
+function thinkingLevelMapFromLevels(value: unknown): ThinkingLevelMap | undefined {
+	const map: ThinkingLevelMap = {};
+	for (const level of reasoningLevels(value)) {
+		switch (level) {
+			case "none":
+			case "off":
+				map.off = level;
+				break;
+			case "minimal":
+			case "low":
+			case "medium":
+			case "high":
+			case "xhigh":
+			case "max":
+				map[level] = level;
+				break;
+		}
+	}
+	return Object.keys(map).length > 0 ? map : undefined;
+}
+
+function inputFromModel(model: JsonObject | undefined, capabilities: JsonObject | undefined): Array<"text" | "image"> {
+	const candidates = [
+		model?.input,
+		model?.input_types,
+		model?.input_modalities,
+		model?.supportedInputModalities,
+		model?.supported_input_modalities,
+		capabilities?.input_modalities,
+		capabilities?.inputModalities,
+	];
+	const input = candidates.map(validInput).find((value): value is Array<"text" | "image"> => value !== undefined) ?? ["text"];
+	if (model?.vision === true || capabilities?.vision === true) {
+		const augmented: Array<"text" | "image"> = [...input];
+		if (!augmented.includes("image")) augmented.push("image");
+		return augmented;
+	}
+	return input;
 }
 
 /** Strip // comments and trailing commas without changing quoted strings. */
 export function stripJsonComments(input: string): string {
 	return input
-		.replace(/"(?:\\.|[^"\\])*"|\/\/[^\n]*/g, (match) => (match[0] === '"' ? match : ""))
-		.replace(/"(?:\\.|[^"\\])*"|,(\s*[}\]])/g, (match, tail: string) =>
-			tail ?? (match[0] === '"' ? match : ""),
+		.replace(/"(?:\\.|[^"\\])*"|\/\/[^\n]*/g, (match) =>
+			match[0] === '"' ? match : "",
+		)
+		.replace(
+			/"(?:\\.|[^"\\])*"|,(\s*[}\]])/g,
+			(match, tail: string) => tail ?? (match[0] === '"' ? match : ""),
 		);
 }
 
 function modelsConfigPath(): string {
-	return join(process.env.PI_CODING_AGENT_DIR || join(homedir(), ".pi", "agent"), "models.json");
+	return join(
+		process.env.PI_CODING_AGENT_DIR || join(homedir(), ".pi", "agent"),
+		"models.json",
+	);
 }
 
-export async function readDynamicProviders(filePath = modelsConfigPath()): Promise<DynamicProvider[]> {
+export async function readDynamicProviders(
+	filePath = modelsConfigPath(),
+): Promise<DynamicProvider[]> {
 	let source: string;
 	try {
 		source = await readFile(filePath, "utf8");
 	} catch (error) {
 		if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
-		process.stderr.write(`OpenAI model discovery could not read ${filePath}: ${String(error)}\n`);
+		process.stderr.write(
+			`OpenAI model discovery could not read ${filePath}: ${String(error)}\n`,
+		);
 		return [];
 	}
 
@@ -96,7 +188,9 @@ export async function readDynamicProviders(filePath = modelsConfigPath()): Promi
 		const parsed = JSON.parse(stripJsonComments(source));
 		config = asObject(parsed) ?? {};
 	} catch (error) {
-		process.stderr.write(`OpenAI model discovery could not parse ${filePath}: ${String(error)}\n`);
+		process.stderr.write(
+			`OpenAI model discovery could not parse ${filePath}: ${String(error)}\n`,
+		);
 		return [];
 	}
 
@@ -105,31 +199,58 @@ export async function readDynamicProviders(filePath = modelsConfigPath()): Promi
 
 	return Object.entries(providers).flatMap(([id, value]) => {
 		const provider = asObject(value);
-		const baseUrl = typeof provider?.baseUrl === "string" ? provider.baseUrl.trim() : "";
+		const baseUrl =
+			typeof provider?.baseUrl === "string" ? provider.baseUrl.trim() : "";
 		const models = provider?.models;
-		if (!baseUrl || (models !== undefined && (!Array.isArray(models) || models.length > 0))) return [];
-		return [{
-			id,
-			baseUrl,
-			api: (typeof provider?.api === "string" ? provider.api : DEFAULT_API) as ProviderApi,
-		}];
+		if (
+			!baseUrl ||
+			(models !== undefined && (!Array.isArray(models) || models.length > 0))
+		)
+			return [];
+		return [
+			{
+				id,
+				baseUrl,
+				api: (typeof provider?.api === "string"
+					? provider.api
+					: DEFAULT_API) as ProviderApi,
+			},
+		];
 	});
 }
 
-export function mapModelRecord(record: unknown, provider: DynamicProvider): ProviderModelDefinition {
+export function mapModelRecord(
+	record: unknown,
+	provider: DynamicProvider,
+): ProviderModelDefinition {
 	const model = asObject(record);
-	const id = typeof model?.id === "string" ? model.id.trim() : "";
-	if (!id) throw new Error(`Model discovery failed for ${provider.id}: every model needs a non-empty id`);
+	const id = firstString(model?.id, model?.slug, model?.model, model?.name) ?? "";
+	if (!id)
+		throw new Error(
+			`Model discovery failed for ${provider.id}: every model needs a non-empty id`,
+		);
 
 	const capabilities = asObject(model?.capabilities);
 	const cost = asObject(model?.cost);
+	const levels =
+		model?.supported_reasoning_levels ??
+		model?.reasoning_levels ??
+		capabilities?.supported_reasoning_levels;
+	const thinkingLevelMap = thinkingLevelMapFromLevels(levels);
 	return {
 		id,
-		name: typeof model?.name === "string" && model.name.trim() ? model.name : id,
+		name: firstString(model?.name, model?.display_name, model?.displayName) ?? id,
 		api: provider.api,
 		baseUrl: provider.baseUrl,
-		reasoning: firstBoolean(model?.reasoning, model?.supports_reasoning, capabilities?.reasoning) ?? false,
-		input: validInput(model?.input ?? model?.input_types) ?? ["text"],
+		reasoning:
+			firstBoolean(
+				model?.reasoning,
+				model?.supports_reasoning,
+				capabilities?.reasoning,
+				reasoningFromLevels(levels),
+			) ?? false,
+		...(thinkingLevelMap ? { thinkingLevelMap } : {}),
+		input: inputFromModel(model, capabilities),
 		cost: {
 			input: numberOrZero(cost?.input),
 			output: numberOrZero(cost?.output),
@@ -137,14 +258,36 @@ export function mapModelRecord(record: unknown, provider: DynamicProvider): Prov
 			cacheWrite: numberOrZero(cost?.cacheWrite ?? cost?.cache_write),
 		},
 		contextWindow:
-			positiveNumber(model?.contextWindow, model?.context_window, model?.context_length, model?.max_model_len) ??
-			DEFAULT_CONTEXT_WINDOW,
+			positiveNumber(
+				model?.contextWindow,
+				model?.context_window,
+				model?.context_length,
+				model?.max_context_window,
+				model?.max_model_len,
+				capabilities?.contextWindow,
+				capabilities?.context_window,
+				capabilities?.contextLength,
+				capabilities?.context_length,
+			) ?? DEFAULT_CONTEXT_WINDOW,
 		maxTokens:
-			positiveNumber(model?.maxTokens, model?.max_tokens, model?.max_output_tokens) ?? DEFAULT_MAX_TOKENS,
+			positiveNumber(
+				model?.maxTokens,
+				model?.max_tokens,
+				model?.max_output_tokens,
+				model?.max_completion_tokens,
+				model?.max_output,
+				capabilities?.maxOutput,
+				capabilities?.max_output,
+				capabilities?.maxTokens,
+				capabilities?.max_tokens,
+			) ?? DEFAULT_MAX_TOKENS,
 	};
 }
 
-function toProviderModelDefinition(model: unknown, provider: DynamicProvider): ProviderModelDefinition {
+function toProviderModelDefinition(
+	model: unknown,
+	provider: DynamicProvider,
+): ProviderModelDefinition {
 	return mapModelRecord(model, provider);
 }
 
@@ -153,18 +296,97 @@ export function modelDiscoveryUrl(baseUrl: string): URL {
 	try {
 		url = new URL(baseUrl);
 	} catch {
-		throw new Error(`Model discovery requires a valid HTTP(S) base URL, got ${baseUrl}`);
+		throw new Error(
+			`Model discovery requires a valid HTTP(S) base URL, got ${baseUrl}`,
+		);
 	}
 	if (url.protocol !== "http:" && url.protocol !== "https:") {
-		throw new Error(`Model discovery requires an HTTP(S) base URL, got ${url.protocol}`);
+		throw new Error(
+			`Model discovery requires an HTTP(S) base URL, got ${url.protocol}`,
+		);
 	}
 	if (!url.hostname || url.username || url.password) {
-		throw new Error("Model discovery base URL must have a hostname and no embedded credentials");
+		throw new Error(
+			"Model discovery base URL must have a hostname and no embedded credentials",
+		);
 	}
 	url.pathname = `${url.pathname.replace(/\/+$/, "")}/models`;
 	url.search = "";
 	url.hash = "";
 	return url;
+}
+
+function extractModelRecords(payload: unknown): unknown[] | undefined {
+	if (Array.isArray(payload)) return payload;
+	const root = asObject(payload);
+	if (!root) return undefined;
+	for (const key of ["data", "models", "results"]) {
+		if (Array.isArray(root[key])) return root[key];
+	}
+	return undefined;
+}
+
+function hasModelMetadata(record: unknown): boolean {
+	const model = asObject(record);
+	if (!model) return false;
+	return [
+		"slug",
+		"name",
+		"display_name",
+		"context_window",
+		"context_length",
+		"max_context_window",
+		"max_completion_tokens",
+		"max_output_tokens",
+		"input_modalities",
+		"supportedInputModalities",
+		"supported_reasoning_levels",
+		"reasoning",
+		"supports_reasoning",
+	].some((key) => key in model) || asObject(model.capabilities) !== undefined;
+}
+
+async function fetchCatalog(
+	url: URL,
+	headers: Record<string, string>,
+	signal: AbortSignal,
+): Promise<unknown> {
+	const response = await fetch(url, { signal, headers });
+	if (!response.ok) {
+		throw new Error(`Model discovery failed: HTTP ${response.status}`);
+	}
+	return response.json();
+}
+
+async function discoverModelRecords(
+	discoveryUrl: URL,
+	headers: Record<string, string>,
+	signal: AbortSignal,
+): Promise<unknown[]> {
+	const payload = await fetchCatalog(discoveryUrl, headers, signal);
+	const records = extractModelRecords(payload);
+	if (!records) {
+		throw new Error("Model discovery failed: response has no model list");
+	}
+	if (records.length === 0 || records.some(hasModelMetadata)) return records;
+
+	// CLIProxyAPI exposes its richer Codex catalog behind this query parameter;
+	// ordinary OpenAI-compatible servers generally ignore the extra parameter.
+	let metadataUrl: URL;
+	try {
+		metadataUrl = new URL(discoveryUrl.toString());
+	} catch {
+		return records;
+	}
+	metadataUrl.searchParams.set("client_version", "pi");
+	try {
+		const metadataPayload = await fetchCatalog(metadataUrl, headers, signal);
+		const metadataRecords = extractModelRecords(metadataPayload);
+		if (metadataRecords && metadataRecords.length > 0) return metadataRecords;
+	} catch {
+		// Keep the standard catalog when the optional metadata request is unsupported.
+	}
+	return records;
 }
 
 export async function refreshProvider(
@@ -183,35 +405,36 @@ export async function refreshProvider(
 	}
 
 	const discoveryUrl = modelDiscoveryUrl(provider.baseUrl);
-	const response = await fetch(discoveryUrl, {
-		signal: context.signal,
+	const records = await discoverModelRecords(
+		discoveryUrl,
 		headers,
-	});
-	if (!response.ok) {
-		throw new Error(`Model discovery failed for ${provider.id}: HTTP ${response.status}`);
-	}
+		context.signal,
+	);
 
-	const payload = await response.json();
-	if (!Array.isArray(payload?.data)) {
-		throw new Error(`Model discovery failed for ${provider.id}: response.data is not an array`);
-	}
-
-	const definitions = payload.data.map((record: unknown) => mapModelRecord(record, provider));
+	const definitions = records.map((record: unknown) =>
+		mapModelRecord(record, provider),
+	);
 	await context.publish({
 		persist: {
 			checkedAt: Date.now(),
-			models: definitions.map((model: ProviderModelDefinition) => ({ ...model, provider: provider.id })),
+			models: definitions.map((model: ProviderModelDefinition) => ({
+				...model,
+				provider: provider.id,
+			})),
 		},
 	});
 	return definitions;
 }
 
-export default async function openAIModelDiscovery(pi: ExtensionAPI): Promise<void> {
+export default async function openAIModelDiscovery(
+	pi: ExtensionAPI,
+): Promise<void> {
 	for (const provider of await readDynamicProviders()) {
 		pi.registerProvider(provider.id, {
 			baseUrl: provider.baseUrl,
 			api: provider.api,
-			refreshModels: (context: RefreshContext) => refreshProvider(provider, context),
+			refreshModels: (context: RefreshContext) =>
+				refreshProvider(provider, context),
 		});
 	}
 }
