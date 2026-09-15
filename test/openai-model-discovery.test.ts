@@ -185,8 +185,8 @@ test("maps 9router and CLIProxyAPI capability metadata", () => {
 	assert.deepEqual(cliProxyApi.input, ["text", "image"]);
 	assert.equal(cliProxyApi.contextWindow, 372_000);
 	assert.deepEqual(cliProxyApi.thinkingLevelMap, {
-		xhigh: null,
-		max: null,
+		xhigh: "xhigh",
+		max: "max",
 		low: "low",
 		medium: "medium",
 		high: "high",
@@ -339,8 +339,8 @@ test("uses CLIProxyAPI's rich catalog when /v1/models is skeletal", async () => 
 		assert.equal(models[0]?.contextWindow, 372_000);
 		assert.deepEqual(models[0]?.input, ["text", "image"]);
 		assert.deepEqual(models[0]?.thinkingLevelMap, {
-			xhigh: null,
-			max: null,
+			xhigh: "xhigh",
+			max: "max",
 			low: "low",
 			medium: "medium",
 			high: "high",

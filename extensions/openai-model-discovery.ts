@@ -123,7 +123,6 @@ function reasoningFromLevels(value: unknown): boolean | undefined {
 
 function thinkingLevelMapFromLevels(
 	value: unknown,
-	allowExtended = true,
 ): ThinkingLevelMap | undefined {
 	const levels = reasoningLevels(value);
 	if (levels.length === 0) return undefined;
@@ -143,7 +142,7 @@ function thinkingLevelMapFromLevels(
 				break;
 			case "xhigh":
 			case "max":
-				if (allowExtended) map[level] = level;
+				map[level] = level;
 				break;
 		}
 	}
@@ -281,7 +280,7 @@ export function mapModelRecord(
 	);
 	const reasoning = explicitReasoning ?? gptModel;
 	const thinkingLevelMap =
-		thinkingLevelMapFromLevels(levels, !gptModel) ??
+		thinkingLevelMapFromLevels(levels) ??
 		(reasoning && gptModel
 			? { minimal: "low", xhigh: null, max: null }
 			: undefined);
