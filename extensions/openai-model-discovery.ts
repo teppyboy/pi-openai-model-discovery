@@ -38,6 +38,11 @@ type ThinkingLevel =
 	| "max";
 type ThinkingLevelMap = Partial<Record<ThinkingLevel, string | null>>;
 
+const FORCED_THINKING_LEVELS: ThinkingLevelMap = {
+	xhigh: "xhigh",
+	max: "max",
+};
+
 export type ProviderModelDefinition = {
 	id: string;
 	name: string;
@@ -57,10 +62,6 @@ function asObject(value: unknown): JsonObject | undefined {
 	return typeof value === "object" && value !== null && !Array.isArray(value)
 		? (value as JsonObject)
 		: undefined;
-}
-
-function firstBoolean(...values: unknown[]): boolean | undefined {
-	return values.find((value): value is boolean => typeof value === "boolean");
 }
 
 function positiveNumber(...values: unknown[]): number | undefined {
@@ -114,13 +115,6 @@ function reasoningLevels(value: unknown): string[] {
 	});
 }
 
-function reasoningFromLevels(value: unknown): boolean | undefined {
-	const levels = reasoningLevels(value);
-	return levels.length > 0
-		? levels.some((level) => level !== "none" && level !== "off")
-		: undefined;
-}
-
 function thinkingLevelMapFromLevels(
 	value: unknown,
 ): ThinkingLevelMap | undefined {
@@ -150,12 +144,6 @@ function thinkingLevelMapFromLevels(
 		map.minimal = "low";
 	}
 	return map;
-}
-
-function isGptReasoningModel(id: string): boolean {
-	// ponytail: bare 9router catalogs expose IDs only; use the conservative GPT-5
-	// floor until the gateway provides per-model reasoning metadata.
-	return /(?:^|\/)gpt-5(?:[.-]|$)/i.test(id);
 }
 
 function inputFromModel(
@@ -271,19 +259,11 @@ export function mapModelRecord(
 		model?.supported_reasoning_levels ??
 		model?.reasoning_levels ??
 		capabilities?.supported_reasoning_levels;
-	const gptModel = isGptReasoningModel(id);
-	const explicitReasoning = firstBoolean(
-		model?.reasoning,
-		model?.supports_reasoning,
-		capabilities?.reasoning,
-		reasoningFromLevels(levels),
-	);
-	const reasoning = explicitReasoning ?? gptModel;
-	const thinkingLevelMap =
-		thinkingLevelMapFromLevels(levels) ??
-		(reasoning && gptModel
-			? { minimal: "low", xhigh: null, max: null }
-			: undefined);
+	const reasoning = true;
+	const thinkingLevelMap = {
+		...(thinkingLevelMapFromLevels(levels) ?? {}),
+		...FORCED_THINKING_LEVELS,
+	};
 	return {
 		id,
 		name: firstString(model?.name, model?.display_name, model?.displayName) ?? id,

@@ -36,14 +36,14 @@ The extension also honors `PI_CODING_AGENT_DIR`. Providers with a non-empty `mod
 
 During Pi's model-catalog refresh, the extension requests `GET {baseUrl}/models` (for the example, `/v1/models`) and maps the response into Pi models. A resolved API-key credential is sent as `Authorization: Bearer ...`.
 
-The mapper understands 9router's `context_length`, `max_completion_tokens`, and nested `capabilities` fields. When a catalog contains only bare IDs, it makes an optional `?client_version=pi` request for gateways such as CLIProxyAPI, which exposes richer `models[].slug`, `context_window`, `input_modalities`, and `supported_reasoning_levels` metadata there. Bare GPT-5 IDs are treated as reasoning models with `minimal` mapped to `low`. Explicit `supported_reasoning_levels` metadata enables every advertised level, including `xhigh` and `max`; unknown levels remain unsupported.
+The mapper understands 9router's `context_length`, `max_completion_tokens`, and nested `capabilities` fields. Every discovered model is exposed as reasoning-capable with `xhigh` and `max` mapped directly to the provider. Other levels from explicit `supported_reasoning_levels` metadata are preserved; unknown levels remain unsupported.
 
 ## Defaults and failures
 
 The extension uses endpoint metadata when available and conservative defaults otherwise:
 
 - text-only input
-- non-reasoning
+- reasoning enabled with `xhigh` and `max`
 - zero token cost
 - 128,000-token context window
 - 16,384 maximum output tokens

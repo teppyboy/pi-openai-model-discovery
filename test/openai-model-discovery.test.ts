@@ -121,6 +121,7 @@ test("mapModelRecord uses metadata and conservative defaults", () => {
 			api: "openai-completions",
 			baseUrl: dynamicProvider.baseUrl,
 			reasoning: true,
+			thinkingLevelMap: { xhigh: "xhigh", max: "max" },
 			input: ["text", "image"],
 			cost: { input: 1, output: 2, cacheRead: 0.1, cacheWrite: 0.2 },
 			contextWindow: 32_000,
@@ -129,7 +130,11 @@ test("mapModelRecord uses metadata and conservative defaults", () => {
 	);
 
 	const defaults = mapModelRecord({ id: "basic" }, dynamicProvider);
-	assert.equal(defaults.reasoning, false);
+	assert.equal(defaults.reasoning, true);
+	assert.deepEqual(defaults.thinkingLevelMap, {
+		xhigh: "xhigh",
+		max: "max",
+	});
 	assert.deepEqual(defaults.input, ["text"]);
 	assert.equal(defaults.contextWindow, DEFAULT_CONTEXT_WINDOW);
 	assert.equal(defaults.maxTokens, DEFAULT_MAX_TOKENS);
@@ -150,17 +155,15 @@ test("maps 9router and CLIProxyAPI capability metadata", () => {
 	assert.equal(nineRouter.contextWindow, 1_000_000);
 	assert.equal(nineRouter.maxTokens, 128_000);
 	assert.deepEqual(nineRouter.thinkingLevelMap, {
-		minimal: "low",
-		xhigh: null,
-		max: null,
+		xhigh: "xhigh",
+		max: "max",
 	});
 
 	const bareNineRouter = mapModelRecord({ id: "gpt-5.6-sol" }, dynamicProvider);
 	assert.equal(bareNineRouter.reasoning, true);
 	assert.deepEqual(bareNineRouter.thinkingLevelMap, {
-		minimal: "low",
-		xhigh: null,
-		max: null,
+		xhigh: "xhigh",
+		max: "max",
 	});
 
 	const cliProxyApi = mapModelRecord(
