@@ -48,7 +48,7 @@ The extension uses endpoint metadata when available and conservative defaults ot
 - 128,000-token context window
 - 16,384 maximum output tokens
 
-Successful catalogs are persisted and restored before refresh. If a later request fails, Pi keeps the previous catalog and reports the refresh error. Invalid or non-HTTP(S) base URLs are rejected.
+Successful non-empty catalogs are persisted in Pi's `models-store.json`. On startup, cached models are registered immediately so model selection (including subagents) works before refresh. Failed or empty refreshes reuse the last successful catalog; first-ever discovery failures still report an error. Invalid or non-HTTP(S) base URLs are rejected.
 
 Local unauthenticated servers should still set a harmless `apiKey` such as `local`, so Pi considers the provider configured. Providers using stored credentials or `/login` continue to use Pi's normal credential resolution.
 

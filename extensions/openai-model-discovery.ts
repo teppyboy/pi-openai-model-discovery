@@ -184,11 +184,12 @@ export function stripJsonComments(input: string): string {
 		);
 }
 
+function agentDir(): string {
+	return process.env.PI_CODING_AGENT_DIR || join(homedir(), ".pi", "agent");
+}
+
 function modelsConfigPath(): string {
-	return join(
-		process.env.PI_CODING_AGENT_DIR || join(homedir(), ".pi", "agent"),
-		"models.json",
-	);
+	return join(agentDir(), "models.json");
 }
 
 export async function readDynamicProviders(
@@ -305,11 +306,16 @@ export function mapModelRecord(
 	};
 }
 
-function toProviderModelDefinition(
-	model: unknown,
+function storedModels(
+	stored: unknown,
 	provider: DynamicProvider,
-): ProviderModelDefinition {
-	return mapModelRecord(model, provider);
+): ProviderModelDefinition[] {
+	const models = asObject(stored)?.models;
+	return Array.isArray(models)
+		? models
+				.filter((model) => asObject(model)?.provider === provider.id)
+				.map((model) => mapModelRecord(model, provider))
+		: [];
 }
 
 export function modelDiscoveryUrl(baseUrl: string): URL {
@@ -416,46 +422,64 @@ export async function refreshProvider(
 	provider: DynamicProvider,
 	context: RefreshContext,
 ): Promise<ProviderModelDefinition[]> {
-	if (!context.allowNetwork) {
-		return (Array.isArray(context.stored?.models) ? context.stored.models : [])
-			.filter((model: unknown) => asObject(model)?.provider === provider.id)
-			.map((model: unknown) => toProviderModelDefinition(model, provider));
+	const cached = storedModels(context.stored, provider);
+	if (!context.allowNetwork) return cached;
+
+	try {
+		const headers: Record<string, string> = { accept: "application/json" };
+		if (context.credential?.type === "api_key" && context.credential.key) {
+			headers.Authorization = `Bearer ${context.credential.key}`;
+		}
+
+		const records = await discoverModelRecords(
+			modelDiscoveryUrl(provider.baseUrl),
+			headers,
+			context.signal,
+		);
+		if (records.length === 0) throw new Error("Model discovery returned no models");
+		const definitions = records.map((record) => mapModelRecord(record, provider));
+		await context.publish({
+			persist: {
+				checkedAt: Date.now(),
+				models: definitions.map((model) => ({
+					...model,
+					provider: provider.id,
+				})),
+			},
+		});
+		return definitions;
+	} catch (error) {
+		if (context.signal.aborted || cached.length === 0) throw error;
+		process.stderr.write(
+			`OpenAI model discovery failed for ${provider.id}; using cached models: ${String(error)}\n`,
+		);
+		return cached;
 	}
-
-	const headers: Record<string, string> = { accept: "application/json" };
-	if (context.credential?.type === "api_key" && context.credential.key) {
-		headers.Authorization = `Bearer ${context.credential.key}`;
-	}
-
-	const discoveryUrl = modelDiscoveryUrl(provider.baseUrl);
-	const records = await discoverModelRecords(
-		discoveryUrl,
-		headers,
-		context.signal,
-	);
-
-	const definitions = records.map((record: unknown) =>
-		mapModelRecord(record, provider),
-	);
-	await context.publish({
-		persist: {
-			checkedAt: Date.now(),
-			models: definitions.map((model: ProviderModelDefinition) => ({
-				...model,
-				provider: provider.id,
-			})),
-		},
-	});
-	return definitions;
 }
 
 export default async function openAIModelDiscovery(
 	pi: ExtensionAPI,
 ): Promise<void> {
-	for (const provider of await readDynamicProviders()) {
+	const providers = await readDynamicProviders();
+	let cache: JsonObject = {};
+	try {
+		cache =
+			asObject(
+				JSON.parse(await readFile(join(agentDir(), "models-store.json"), "utf8")),
+			) ?? {};
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+			process.stderr.write(
+				`OpenAI model discovery could not read cached models: ${String(error)}\n`,
+			);
+		}
+	}
+	for (const provider of providers) {
+		const models = storedModels(cache[provider.id], provider);
 		pi.registerProvider(provider.id, {
 			baseUrl: provider.baseUrl,
 			api: provider.api,
+			...(models.length > 0 ? { models } : {}),
 			refreshModels: (context: RefreshContext) =>
 				refreshProvider(provider, context),
 		});

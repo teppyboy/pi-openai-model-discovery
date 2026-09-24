@@ -358,6 +358,63 @@ test("uses CLIProxyAPI's rich catalog when /v1/models is skeletal", async () => 
 	}
 });
 
+test("cached catalog survives startup and failed or empty refresh", async () => {
+	const originalFetch = globalThis.fetch;
+	const originalDirectory = process.env.PI_CODING_AGENT_DIR;
+	const { directory } = await writeConfig(`{
+		"providers": {
+			"local-server": {"baseUrl": "http://127.0.0.1:1234/v1"}
+		}
+	}`);
+	process.env.PI_CODING_AGENT_DIR = directory;
+	const saved = {
+		models: [
+			{ id: "gpt-5.6-luna", provider: "local-server", contextWindow: 372_000 },
+			{ id: "foreign", provider: "other" },
+		],
+	};
+	await writeFile(
+		join(directory, "models-store.json"),
+		JSON.stringify({ "local-server": saved }),
+	);
+	const registrations: Registration[] = [];
+	try {
+		await openAIModelDiscovery({
+			registerProvider(name: string, config: ProviderConfig) {
+				registrations.push({ name, config });
+			},
+		} as unknown as ExtensionAPI);
+		const registered = registrations[0]?.config;
+		assert.deepEqual(registered?.models?.map((model) => model.id), [
+			"gpt-5.6-luna",
+		]);
+		assert.equal(registered?.models?.[0]?.contextWindow, 372_000);
+		const refresh = registered?.refreshModels;
+		assert.ok(refresh);
+		assert.deepEqual((await refresh(context({ allowNetwork: false, stored: saved }))).map((model) => model.id), ["gpt-5.6-luna"]);
+		let published = 0;
+		const failedContext = context({
+			stored: saved,
+			publish: async () => {
+				published++;
+				return true;
+			},
+		});
+		globalThis.fetch = async () =>
+			new Response("upstream unavailable", { status: 503 });
+		const fallback = await refresh(failedContext);
+		assert.deepEqual(fallback.map((model) => model.id), ["gpt-5.6-luna"]);
+		globalThis.fetch = async () => new Response(JSON.stringify({ data: [] }));
+		assert.deepEqual(await refresh(failedContext), fallback);
+		assert.equal(published, 0);
+	} finally {
+		globalThis.fetch = originalFetch;
+		if (originalDirectory === undefined) delete process.env.PI_CODING_AGENT_DIR;
+		else process.env.PI_CODING_AGENT_DIR = originalDirectory;
+		await rm(directory, { recursive: true, force: true });
+	}
+});
+
 test("failed discovery does not publish a replacement catalog", async () => {
 	const originalFetch = globalThis.fetch;
 	const { directory, filePath } = await writeConfig(`{
