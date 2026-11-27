@@ -4,10 +4,10 @@
   "private": true,
   "type": "module",
   "keywords": ["pi-package"],
-  "files": ["extensions", "README.md"],
+  "files": ["extensions", "src", "README.md"],
   "scripts": {
     "test": "node --test --experimental-strip-types test/openai-model-discovery.test.ts",
-    "check": "node --experimental-strip-types --check extensions/openai-model-discovery.ts"
+    "check": "node --experimental-strip-types --check src/config.ts && node --experimental-strip-types --check src/pricing.ts && node --experimental-strip-types --check extensions/openai-model-discovery.ts && node --experimental-strip-types --check test/openai-model-discovery.test.ts"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*"
